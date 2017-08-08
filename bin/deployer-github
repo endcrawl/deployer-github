@@ -1,0 +1,207 @@
+#!/usr/bin/env python
+'''
+Trigger automated deployments via Github webhooks.
+Run me under tcpserver or unixserver.
+Or, feed me HTTP requests directly on stdin.
+'''
+
+import sys, os, io, re
+import optparse
+import http_parser.http
+import simplejson as json
+import hmac
+from hashlib import sha1
+
+
+def main( argv, stdin, stdout, stderr ):
+
+  def logging_option( option, opt_str, value, parser ):
+    if option.get_opt_string() == '--verbose':
+      parser.values.log_level += 1
+    elif option.get_opt_string() == '--quiet':
+      parser.values.log_level -= 1
+
+  prog = argv[0].split('/')[-1]
+  optp = optparse.OptionParser()
+  optp.add_option( '-n', '--dry-run',      help="Receive webhooks but don't act on them.", action='store_true' )
+  optp.add_option( '-s', '--secret',       help="Secret token for the Github webhook.", default='' )
+  optp.add_option( '-m', '--max-post-size',help="Maximum HTTP post size.", default=0 )
+  optp.add_option( '-L', '--log-level',    help="Set logging level.", type='int', default=0, action='store' )
+  optp.add_option( '-v', '--verbose',      help="Increase logging verbosity.", action='callback', callback=logging_option )
+  optp.add_option( '-q', '--quiet',        help="Decrease logging verbosity.", action='callback', callback=logging_option )
+  opts, args = optp.parse_args( args=argv[1:] )
+
+  if not len(args):
+    print >> stderr, "usage: %s [options] <deploy-program>" % prog
+    exit(1)
+
+  config = {}
+
+  # Configure from the environment.
+
+  for k, v in os.environ.items():
+    if not k.startswith('DEPLOYER_GITHUB_'): continue
+    config[k.replace('DEPLOYER_GITHUB_','')] = v
+
+  # Configure from options.
+
+  config.update([ (kv[0].upper(),kv[1]) for kv in \
+    filter( lambda kv: kv[1] != None, vars(opts).items() ) ])
+
+  # Normalize some config items.
+
+  config['DRY_RUN']       = int(config.get('DRY_RUN',0))
+  config['MAX_POST_SIZE'] = int(config.get('MAX_POST_SIZE',0))
+
+  # For convenience, make the config accessible by attribute.
+
+  config = ConfigDict( config )
+
+  # Logging.
+
+  log = Logger( level=int(config.get('LOG_LEVEL',1)) )
+
+  # Re-open the stdin and stdout file descriptors using raw unbuffered i/o.
+
+  stdin  = io.FileIO( stdin.fileno() )
+  stdout = io.FileIO( stdout.fileno(), 'w' )
+
+  # Set up an http parser reading requests from stdin.
+
+  httpin = http_parser.http.HttpStream( stdin, kind=http_parser.http.HTTP_REQUEST )
+
+  # Parse headers and start parsing body. Throws on invalid HTTP.
+
+  env  = httpin.wsgi_environ()
+  body = httpin.body_file()
+  hdrs = httpin.headers()
+
+  request_method = env.get('REQUEST_METHOD',None)
+  content_type   = hdrs.get('Content-Type',None)
+  content_length = long(hdrs.get('Content-Length',0))
+  event_name     = hdrs.get('X-Github-Event',None)
+  signature      = hdrs.get('X-Hub-Signature',None)
+  delivery_id    = hdrs.get('X-Github-Delivery',None)
+
+  log(1,"%s %s" % (request_method, env.get('PATH_INFO','')))
+
+  # Verify HTTP request and headers. Shallow verification.
+
+  if request_method != 'POST':
+    log(1,"skipping, ignored request method: %s" % request_method)
+    return respond_ok(stdout)
+
+  if config.MAX_POST_SIZE and content_length > config.MAX_POST_SIZE:
+    log(1,"skipping, content length is too long: %d > %d" % (content_length,config.MAX_POST_SIZE))
+    return respond_ok(stdout)
+
+  if content_type != 'application/json':
+    log(1,"skipping, ignored content type: %s" % content_type)
+    return respond_ok(stdout)
+
+  log(1,"event %s %s" % (event_name,delivery_id))
+
+  if not event_name in ['push','pull_request']:
+    log(1,"skipping, ignored event type: %s" % event_name)
+    return respond_ok(stdout)
+
+  # Verify the hashed signature in X-Hub-Signature. For security.
+
+  body_string = body.read(config.MAX_POST_SIZE or -1)
+  if len(config.SECRET):
+    if not secure_compare(signature,'sha1='+hmac.HMAC(config.SECRET,body_string,sha1).hexdigest()):
+      log(1,"skipping, invalid signature: %s" % signature)
+      return respond_ok(stdout)
+
+  # Verify data in the payload.
+
+  payload = json.loads(body_string)
+  repository = payload.get('repository',{}).get('name',None)
+
+  if not repository:
+    log(1,"skipping, repository name missing")
+    return respond_ok(stdout)
+
+  if not re.compile('^[-A-Za-z0-9_\.]+$').match(repository):
+    log(1,"skipping, repository name invalid: %s" % repository)
+    return respond_ok(stdout)
+
+  if repository in ['.', '..']:
+    log(1,"skipping, repository name invalid: %s" % repository)
+    return respond_ok(stdout)
+
+  # Finally done verifying...let's do something.
+
+  log(1,"running deploy program for repository: %s" % repository)
+
+  if not config.DRY_RUN:
+    pid = os.fork()
+    if pid:
+      waitpid, status = os.waitpid(pid, 0)
+      status = status & 0xff
+      status = 0 if status == 99 else status   # 99 means nothing to do
+      if status: log(1,"deploy program exited non-zero: %d" % status)
+    else:
+      os.close(stdin.fileno())
+      os.close(stdout.fileno())
+      args += [repository]
+      os.execvp(args[0], args)
+
+  respond_ok(stdout)
+
+  return
+
+
+def respond_ok( stdout ):
+  print >> stdout, "HTTP/1.1 200 Ok\r\n",
+  print >> stdout, "Content-Type: text/plain\r\n",
+  print >> stdout, "Content-Length: 2\r\n",
+  print >> stdout, "Connection: close\r\n",
+  print >> stdout, "\r\n",
+  print >> stdout, "ok",
+
+
+def secure_compare(a, b):
+  '''
+  Constant time string comparison.
+  See: http://codahale.com/a-lesson-in-timing-attacks/
+  '''
+  if len(a) != len(b):
+    return False
+  result = 0
+  for x, y in zip(a, b):
+    result |= ord(x) ^ ord(y)
+  return result == 0
+
+
+class ConfigDict( dict ):
+  def __getattr__( self, name ):
+    return self[name]
+
+
+LOGGER_PROGRAM = (sys.argv[0].split('/') if sys.argv else [''])[-1] or '-'
+LOGGER_ID = ''
+HOSTNAME = os.uname()[1] or '-'
+
+
+class Logger(object):
+
+  def __init__(self, level):
+    self.level = level
+
+  def __call__(self, level, message):
+    if level > self.level:
+      return
+    if callable(message):
+      message = message
+    if not isinstance(message,basestring):
+      message = str(message)
+    if not message.endswith('\n'):
+      message += '\n'
+    print >> sys.stderr, "%s/%s/%05d%s: {L%d} %s" % (LOGGER_PROGRAM,HOSTNAME,os.getpid(),'/'+LOGGER_ID if LOGGER_ID else '',level,message),
+
+
+if __name__ == '__main__':
+  main(sys.argv, sys.stdin, sys.stdout, sys.stderr)
+  exit(0)
+
