@@ -23,10 +23,10 @@ def main( argv, stdin, stdout, stderr ):
 
   prog = argv[0].split('/')[-1]
   optp = optparse.OptionParser()
-  optp.add_option( '-n', '--dry-run',      help="Receive webhooks but don't act on them.", action='store_true' )
-  optp.add_option( '-s', '--secret',       help="Secret token for the Github webhook.", default='' )
-  optp.add_option( '-m', '--max-post-size',help="Maximum HTTP post size.", default=0 )
-  optp.add_option( '-L', '--log-level',    help="Set logging level.", type='int', default=0, action='store' )
+  optp.add_option( '-n', '--dry-run',      help="Receive webhooks but don't act on them.", default=int(os.environ.get('DEPLOYER_GITHUB_DRY_RUN',0)), action='store_const', const=1 )
+  optp.add_option( '-s', '--secret',       help="Secret token for the Github webhook.", default=os.environ.get('DEPLOYER_GITHUB_SECRET','') )
+  optp.add_option( '-m', '--max-post-size',help="Maximum HTTP post size.", type='int', default=int(os.environ.get('DEPLOYER_GITHUB_MAX_POST_SIZE',0)) )
+  optp.add_option( '-L', '--log-level',    help="Set logging level.", type='int', default=int(os.environ.get('DEPLOYER_GITHUB_LOG_LEVEL',0)), action='store' )
   optp.add_option( '-v', '--verbose',      help="Increase logging verbosity.", action='callback', callback=logging_option )
   optp.add_option( '-q', '--quiet',        help="Decrease logging verbosity.", action='callback', callback=logging_option )
   opts, args = optp.parse_args( args=argv[1:] )
@@ -35,23 +35,9 @@ def main( argv, stdin, stdout, stderr ):
     print >> stderr, "usage: %s [options] <deploy-program>" % prog
     exit(1)
 
-  config = {}
-
-  # Configure from the environment.
-
-  for k, v in os.environ.items():
-    if not k.startswith('DEPLOYER_GITHUB_'): continue
-    config[k.replace('DEPLOYER_GITHUB_','')] = v
-
   # Configure from options.
 
-  config.update([ (kv[0].upper(),kv[1]) for kv in \
-    filter( lambda kv: kv[1] != None, vars(opts).items() ) ])
-
-  # Normalize some config items.
-
-  config['DRY_RUN']       = int(config.get('DRY_RUN',0))
-  config['MAX_POST_SIZE'] = int(config.get('MAX_POST_SIZE',0))
+  config = dict([[k.upper(),v] for k,v in filter( lambda kv: kv[1] != None, vars(opts).items() )])
 
   # For convenience, make the config accessible by attribute.
 
@@ -59,7 +45,7 @@ def main( argv, stdin, stdout, stderr ):
 
   # Logging.
 
-  log = Logger( level=int(config.get('LOG_LEVEL',1)) )
+  log = Logger( level=config.LOG_LEVEL )
 
   # Re-open the stdin and stdout file descriptors using raw unbuffered i/o.
 
