@@ -21,12 +21,19 @@ def main( argv, stdin, stdout, stderr ):
     elif option.get_opt_string() == '--quiet':
       parser.values.log_level -= 1
 
+  defaults = PropertyDict({
+    'DRY_RUN'       : int(os.environ.get('DEPLOYER_GITHUB_DRY_RUN',0)),
+    'SECRET'        :     os.environ.get('DEPLOYER_GITHUB_SECRET',''),
+    'MAX_POST_SIZE' : int(os.environ.get('DEPLOYER_GITHUB_MAX_POST_SIZE',0)),
+    'LOG_LEVEL'     : int(os.environ.get('DEPLOYER_GITHUB_LOG_LEVEL',0)),
+  })
+
   prog = argv[0].split('/')[-1]
   optp = optparse.OptionParser()
-  optp.add_option( '-n', '--dry-run',      help="Receive webhooks but don't act on them.", default=int(os.environ.get('DEPLOYER_GITHUB_DRY_RUN',0)), action='store_const', const=1 )
-  optp.add_option( '-s', '--secret',       help="Secret token for the Github webhook.", default=os.environ.get('DEPLOYER_GITHUB_SECRET','') )
-  optp.add_option( '-m', '--max-post-size',help="Maximum HTTP post size.", type='int', default=int(os.environ.get('DEPLOYER_GITHUB_MAX_POST_SIZE',0)) )
-  optp.add_option( '-L', '--log-level',    help="Set logging level.", type='int', default=int(os.environ.get('DEPLOYER_GITHUB_LOG_LEVEL',0)), action='store' )
+  optp.add_option( '-n', '--dry-run',      help="Receive webhooks but don't act on them.", default=defaults.DRY_RUN, action='store_const', const=1 )
+  optp.add_option( '-s', '--secret',       help="Secret token for the Github webhook.",    default=defaults.SECRET )
+  optp.add_option( '-m', '--max-post-size',help="Maximum HTTP post size.", type='int',     default=defaults.MAX_POST_SIZE )
+  optp.add_option( '-L', '--log-level',    help="Set logging level.", type='int',          default=defaults.LOG_LEVEL, action='store' )
   optp.add_option( '-v', '--verbose',      help="Increase logging verbosity.", action='callback', callback=logging_option )
   optp.add_option( '-q', '--quiet',        help="Decrease logging verbosity.", action='callback', callback=logging_option )
   opts, args = optp.parse_args( args=argv[1:] )
@@ -41,7 +48,7 @@ def main( argv, stdin, stdout, stderr ):
 
   # For convenience, make the config accessible by attribute.
 
-  config = ConfigDict( config )
+  config = PropertyDict( config )
 
   # Logging.
 
@@ -160,7 +167,7 @@ def secure_compare(a, b):
   return result == 0
 
 
-class ConfigDict( dict ):
+class PropertyDict( dict ):
   def __getattr__( self, name ):
     return self[name]
 
