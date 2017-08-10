@@ -1,0 +1,15 @@
+Source: deployer-github
+Section: utils
+Priority: optional
+Maintainer: Alan Grow <alangrow@gmail.com>
+Build-Depends: debhelper (>= 8.0.0)
+Standards-Version: 3.7.3.0
+Vcs-Git: git@github.com:endcrawl/deployer-github.git
+Vcs-Browser: https://github.com/endcrawl/deployer-github
+
+Package: deployer-github
+Section: utils
+Architecture: all
+Depends: deployer (>= 1:0.1.0), python (>= 2.7), python-http-parser (>= 0.8.3), python-simplejson (>= 3.3.1)
+Description: A Github integration for deployer.
+
