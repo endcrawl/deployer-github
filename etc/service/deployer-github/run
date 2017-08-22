@@ -2,10 +2,7 @@
 set -e
 exec 2>&1
 test `id -u` -gt 0 || exec setuidgid -s deployer-github "$0" "$@"
-sockfile="$PWD/server.sock"
-test -L "$sockfile" && sockfile=`readlink "$sockfile"`
-test -z "$sockfile" || sockfile=`realpath "$sockfile"`
-# TODO require that sockfile be non-empty
+sockfile=`realpath "$PWD/server.sock"`
 cd ./root
 exec unixlisten -- "$sockfile" \
   sh -c '. "$0" && exec "$@"' /etc/deployer-github.conf \
