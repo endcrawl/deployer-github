@@ -13,6 +13,10 @@ getent passwd deployer-github >/dev/null ||
 getent group svc-deployer-github >/dev/null ||
   groupadd -g 626 svc-deployer-github
 
+# Ensure config file is readable by the privsep user.
+
+chgrp deployer-github /etc/deployer-github.conf
+
 # Create state directory.
 
 install -d -m 0755 -o deployer-github -g deployer-github /var/lib/deployer-github
