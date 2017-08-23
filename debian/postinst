@@ -8,6 +8,11 @@ getent group deployer-github >/dev/null ||
 getent passwd deployer-github >/dev/null ||
   useradd deployer-github --system -u 64225 -g deployer-github -G deployers -c "Deployer Github Service" -d /nonexistent -s /usr/sbin/nologin
 
+# Create service operator group.
+
+getent group svc-deployer-github >/dev/null ||
+  groupadd -g 626 svc-deployer-github
+
 # Create state directory.
 
 install -d -m 0755 -o deployer-github -g deployer-github /var/lib/deployer-github
