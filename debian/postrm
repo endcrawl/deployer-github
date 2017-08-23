@@ -1,0 +1,11 @@
+#!/bin/sh
+set -e
+
+# Unregister and stop the service.
+
+test ! -L /service/deployer-github || (
+  cd /service/deployer-github
+  rm /service/deployer-github
+  svc -dx . log
+)
+
