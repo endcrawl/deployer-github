@@ -25,3 +25,10 @@ install -d -m 0755 -o root -g root /var/lib/supervise/deployer-github.log
 
 install -d -m 0775 -o root -g deployer-log /var/log/deployer-github
 
+# Register the service.
+
+install -d -m 0755 -o root -g root /service
+
+test -L /service/deployer-github ||
+  ln -s /etc/service/deployer-github /service/deployer-github
+
