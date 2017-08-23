@@ -2,7 +2,7 @@
 set -e
 exec 2>&1
 test `id -u` -gt 0 || exec setuidgid -s deployer-github "$0" "$@"
-sockfile=`realpath "$PWD/server.sock"`
+sockfile=`readlink -f "$PWD/server.sock"`
 cd ./root
 exec unixserver -v "$sockfile" -- \
   sh -c '. "$0" && exec "$@"' /etc/deployer-github.conf \
